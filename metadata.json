@@ -1,0 +1,6 @@
+{
+  "name": "Changan CEDIS Inventario",
+  "description": "Control Integral de Rendimiento & Flujo de Importación: visualización ejecutiva de volumen de pedidos especiales, estado de contenedores de importación, eficiencia de cruce en CEDIS y demanda segmentada por modelo y sucursal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
