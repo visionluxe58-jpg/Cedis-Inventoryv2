@@ -114,33 +114,61 @@ function doGet(e) {
         var arrDet = [];
         for (var m = 0; m < matriz.length; m++) {
           var r = matriz[m];
-          var pId = r.pedidoId || r['ID Pedido'] || ('PED-' + (m + 1));
+          var pId = r.pedidoId || r['ID Pedido'] || r['pedidoId'] || ('PED-' + (m + 1));
+          var cli = r.cliente || r['Cliente'] || r['cliente'] || '';
+          var suc = r.sucursal || r['Sucursal Solicitante'] || r['Sucursal'] || 'Bodega Central';
+          var col = r.colaborador || r['Colaborador'] || 'Usuario CEDIS';
+          var tip = r.tipoPedido || r['Tipo Pedido'] || 'Especial';
+          var fch = r.fechaCreacion || r['Fecha Registro'] || r['fechaRegistro'] || new Date().toISOString();
+          var mod = r.modeloChangan || r['Modelo Changan'] || r['modelo'] || '';
+          var vinVal = r.vin || r['VIN'] || '';
+          var plc = r.placa || r['Placa'] || '';
+          var cot = r.cotizacion || r['Cotización'] || r['Cotizacion'] || r['N° OR'] || '';
+          var codRep = r.codigoRepuesto || r['Código Repuesto'] || r['Codigo Repuesto'] || '';
+          var codAct = r.codigoActualizado || r['Código Actualizado'] || codRep;
+          var descOf = r.descripcionOficial || r['Descripción Oficial'] || r['Descripcion Oficial'] || '';
+          var cSol = Number(r.cantidadSolicitada || r['Cant Solicitada'] || r['Cantidad Solicitada']) || 1;
+          var cAsig = Number(r.cantidadAsignada || r['Cant Asignada'] || r['Cantidad Asignada']) || 0;
+          var cDesp = Number(r.cantidadDespachada || r['Cant Despachada'] || r['Cantidad Despachada']) || 0;
+          var sPend = Number(r.saldoPendiente || r['Saldo Pendiente']) || Math.max(0, cSol - cAsig - cDesp);
+          var estG = r.estatusGeneral || r['Estatus General'] || r['Estado General'] || 'PENDIENTE';
+          var estL = r.estatusLinea || r['Estatus Línea'] || r['Estatus Linea'] || estG;
+          var cAsignado = r.contenedorAsignado || r['Contenedor Asignado'] || '';
+          var pAsignado = r.palletAsignado || r['Pallet Asignado'] || '';
+          var pkgNo = r.packageNo || r['N° Paquete'] || r['Package No'] || '';
+          var ubi = r.ubicacionCedis || r['Ubicación CEDIS'] || r['Ubicacion CEDIS'] || '';
+
           if (!mapCab[pId]) {
             mapCab[pId] = {
               pedidoId: pId,
-              tipoPedido: r.tipoPedido || 'Especial',
-              fechaCreacion: r.fechaCreacion || new Date().toISOString(),
-              sucursal: r.sucursal || 'Bodega Central',
-              colaborador: r.colaborador || 'Usuario CEDIS',
-              cliente: r.cliente || '',
-              modeloChangan: r.modeloChangan || '',
-              vin: r.vin || '',
-              estatusGeneral: r.estatusGeneral || 'PENDIENTE',
+              tipoPedido: tip,
+              fechaCreacion: fch,
+              sucursal: suc,
+              colaborador: col,
+              cliente: cli,
+              modeloChangan: mod,
+              vin: vinVal,
+              placa: plc,
+              cotizacion: cot,
+              estatusGeneral: estG,
               version: 1
             };
           }
           arrDet.push({
             lineaId: r.lineaId || ('LIN-' + (m + 1)),
             pedidoId: pId,
-            codigoRepuesto: r.codigoRepuesto || '',
-            descripcionOficial: r.descripcionOficial || '',
-            cantidadSolicitada: Number(r.cantidadSolicitada) || 1,
-            cantidadAsignada: Number(r.cantidadAsignada) || 0,
-            cantidadDespachada: Number(r.cantidadDespachada) || 0,
-            saldoPendiente: Number(r.saldoPendiente) || 0,
-            estatusLinea: r.estatusLinea || 'PENDIENTE',
-            contenedorAsignado: r.contenedorAsignado || '',
-            palletAsignado: r.palletAsignado || ''
+            codigoRepuesto: codRep,
+            codigoActualizado: codAct,
+            descripcionOficial: descOf,
+            cantidadSolicitada: cSol,
+            cantidadAsignada: cAsig,
+            cantidadDespachada: cDesp,
+            saldoPendiente: sPend,
+            estatusLinea: estL,
+            contenedorAsignado: cAsignado,
+            palletAsignado: pAsignado,
+            packageNo: pkgNo,
+            ubicacionCedis: ubi
           });
         }
         cabeceras = [];
