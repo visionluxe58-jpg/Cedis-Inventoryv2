@@ -30,7 +30,7 @@ const STORAGE_KEYS = {
   AUDITORIA: 'changan_cedis_auditoria_inmutable_v2',
 };
 
-export const OFFICIAL_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwMhnEB2QAvnnymfH8ZrDYMDMxv3pYtnNh41L_JNtmpqbkF3Qcb5msG2I6XXez46bNc/exec';
+export const OFFICIAL_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbypd1CUr-Vd3_9Cq6PciWaEJwt-3r3px-r19Lsc3i4BnkRhL8OYSqj7JEgC5ESRBz1H/exec';
 
 // Usuarios oficiales con Roles
 export const USUARIOS_OFICIALES: BDEncargado[] = [
@@ -589,7 +589,7 @@ class AppsScriptClientService {
       const c = this.safeGet(STORAGE_KEYS.CONFIG);
       if (c) {
         const parsed = JSON.parse(c);
-        if (!parsed.webAppUrl) {
+        if (!parsed.webAppUrl || parsed.webAppUrl === 'https://script.google.com/macros/s/AKfycbwMhnEB2QAvnnymfH8ZrDYMDMxv3pYtnNh41L_JNtmpqbkF3Qcb5msG2I6XXez46bNc/exec') {
           parsed.webAppUrl = defaultUrl;
           parsed.modoOfflineSimulado = false;
         }
