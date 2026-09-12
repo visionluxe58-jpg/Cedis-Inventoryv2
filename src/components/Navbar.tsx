@@ -1,5 +1,6 @@
 import React from 'react';
 import { 
+  RefreshCw,
   Building2, 
   Boxes, 
   Ship, 
@@ -34,6 +35,8 @@ interface NavbarProps {
   onAbrirModalDPL: () => void;
   onAbrirPortalSucursales?: () => void;
   onAbrirRastreador?: () => void;
+  onSincronizarNube?: () => void;
+  sincronizandoNube?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -47,7 +50,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onAbrirModalCompartir,
   onAbrirModalDPL,
   onAbrirPortalSucursales,
-  onAbrirRastreador
+  onAbrirRastreador,
+  onSincronizarNube,
+  sincronizandoNube = false
 }) => {
   const getBadgeRol = (rol: RolUsuario) => {
     switch (rol) {
@@ -258,6 +263,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Upload className="w-3.5 h-3.5 text-emerald-400" />
               <span className="hidden md:inline">+ DPL</span>
+            </button>
+          )}
+
+          {onSincronizarNube && (
+            <button
+              type="button"
+              onClick={onSincronizarNube}
+              disabled={sincronizandoNube}
+              className="bg-emerald-950/70 hover:bg-emerald-900/90 border border-emerald-500/50 text-emerald-300 text-xs font-bold px-2.5 py-2 rounded-lg flex items-center gap-1.5 shadow transition disabled:opacity-50"
+              title="Sincronizar datos canónicos con Google Sheets en la nube"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${sincronizandoNube ? 'animate-spin text-emerald-400' : ''}`} />
+              <span className="hidden sm:inline">Nube Sheets</span>
             </button>
           )}
 

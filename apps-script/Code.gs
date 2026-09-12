@@ -73,7 +73,7 @@ function doGet(e) {
   try {
     var params = e ? e.parameter : {};
     var action = params.action || (params.userEmail ? 'getInitialData' : 'healthCheck');
-    var userEmail = (params.userEmail || '').trim().toLowerCase();
+    var userEmail = (params.userEmail || params.correo || params.email || 'visionluxe58@gmail.com').trim().toLowerCase();
     var callback = params.callback;
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -104,13 +104,58 @@ function doGet(e) {
       var dplDetalle = getSheetObjects(getSheetSmart(ss, 'DPL_DETALLE'));
       var modelos = getSheetObjects(getSheetSmart(ss, 'MODELOS'));
       var encargados = getSheetObjects(getSheetSmart(ss, 'ENCARGADOS'));
-      var auditoria = getSheetObjects(getSheetSmart(ss, 'AUDITORIA'), 150); // Últimos 150 eventos
+      var auditoria = getSheetObjects(getSheetSmart(ss, 'AUDITORIA'), 150);
+      var shMatriz = getSheetSmart(ss, 'MATRIZ');
+      var matriz = shMatriz ? getSheetObjects(shMatriz) : [];
+
+      // Si no existen cabeceras separadas pero existe Matriz_Central poblada:
+      if ((!cabeceras || cabeceras.length === 0) && matriz && matriz.length > 0) {
+        var mapCab = {};
+        var arrDet = [];
+        for (var m = 0; m < matriz.length; m++) {
+          var r = matriz[m];
+          var pId = r.pedidoId || r['ID Pedido'] || ('PED-' + (m + 1));
+          if (!mapCab[pId]) {
+            mapCab[pId] = {
+              pedidoId: pId,
+              tipoPedido: r.tipoPedido || 'Especial',
+              fechaCreacion: r.fechaCreacion || new Date().toISOString(),
+              sucursal: r.sucursal || 'Bodega Central',
+              colaborador: r.colaborador || 'Usuario CEDIS',
+              cliente: r.cliente || '',
+              modeloChangan: r.modeloChangan || '',
+              vin: r.vin || '',
+              estatusGeneral: r.estatusGeneral || 'PENDIENTE',
+              version: 1
+            };
+          }
+          arrDet.push({
+            lineaId: r.lineaId || ('LIN-' + (m + 1)),
+            pedidoId: pId,
+            codigoRepuesto: r.codigoRepuesto || '',
+            descripcionOficial: r.descripcionOficial || '',
+            cantidadSolicitada: Number(r.cantidadSolicitada) || 1,
+            cantidadAsignada: Number(r.cantidadAsignada) || 0,
+            cantidadDespachada: Number(r.cantidadDespachada) || 0,
+            saldoPendiente: Number(r.saldoPendiente) || 0,
+            estatusLinea: r.estatusLinea || 'PENDIENTE',
+            contenedorAsignado: r.contenedorAsignado || '',
+            palletAsignado: r.palletAsignado || ''
+          });
+        }
+        cabeceras = [];
+        for (var k in mapCab) {
+          if (mapCab.hasOwnProperty(k)) cabeceras.push(mapCab[k]);
+        }
+        detalles = arrDet;
+      }
 
       return jsonResponse({
         success: true,
         data: {
           cabeceras: cabeceras,
           detalles: detalles,
+          matriz: matriz,
           manifiestos: manifiestos,
           dplDetalle: dplDetalle,
           modelos: modelos,
@@ -169,7 +214,7 @@ function doPost(e) {
     var rawBody = e.postData ? e.postData.contents : '{}';
     var payload = JSON.parse(rawBody);
     var action = payload.action;
-    var userEmail = (payload.userEmail || '').trim().toLowerCase();
+    var userEmail = (payload.userEmail || payload.correo || payload.email || 'visionluxe58@gmail.com').trim().toLowerCase();
     var operationId = payload.operationId;
 
     if (!operationId) {

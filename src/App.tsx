@@ -225,6 +225,8 @@ export default function App() {
             onAbrirModalDPL={() => setModalDPLAbierto(true)}
             onAbrirPortalSucursales={activarModoPortal}
             onAbrirRastreador={() => setModalRastreadorAbierto(true)}
+            onSincronizarNube={handleSincronizarNube}
+            sincronizandoNube={sincronizandoNube}
           />
 
           {/* Contenido Principal según el módulo seleccionado */}
