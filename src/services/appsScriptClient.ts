@@ -30,6 +30,8 @@ const STORAGE_KEYS = {
   AUDITORIA: 'changan_cedis_auditoria_inmutable_v2',
 };
 
+export const OFFICIAL_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwMhnEB2QAvnnymfH8ZrDYMDMxv3pYtnNh41L_JNtmpqbkF3Qcb5msG2I6XXez46bNc/exec';
+
 // Usuarios oficiales con Roles
 export const USUARIOS_OFICIALES: BDEncargado[] = [
   {
@@ -582,15 +584,23 @@ class AppsScriptClientService {
   }
 
   private cargarConfig(): AppsScriptApiConfig {
+    const defaultUrl = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_APPS_SCRIPT_URL) || OFFICIAL_WEB_APP_URL;
     try {
       const c = this.safeGet(STORAGE_KEYS.CONFIG);
-      if (c) return JSON.parse(c);
+      if (c) {
+        const parsed = JSON.parse(c);
+        if (!parsed.webAppUrl) {
+          parsed.webAppUrl = defaultUrl;
+          parsed.modoOfflineSimulado = false;
+        }
+        return parsed;
+      }
     } catch (e) {
       console.warn('Error cargando config API:', e);
     }
     return {
-      webAppUrl: '',
-      modoOfflineSimulado: true,
+      webAppUrl: defaultUrl,
+      modoOfflineSimulado: false,
       estadoConexion: 'MODO_LOCAL_SEGURO',
       ultimoPing: new Date().toISOString()
     };
@@ -622,6 +632,140 @@ class AppsScriptClientService {
       });
     }
     return resultado;
+  }
+
+  /**
+   * Sincronización Canónica Bidireccional: Trae datos vivos desde Google Apps Script (Endpoint getInitialData)
+   * e hidrata el estado local de la aplicación.
+   */
+  public async fetchInitialData(forzar: boolean = false): Promise<{
+    success: boolean;
+    error?: string;
+    totalCargado?: {
+      cabeceras: number;
+      detalles: number;
+      manifiestos: number;
+      dplDetalle: number;
+      modelos: number;
+      encargados: number;
+      auditoria: number;
+    };
+  }> {
+    if (!this.config.webAppUrl || this.config.modoOfflineSimulado) {
+      return {
+        success: true,
+        error: 'Modo local activo (no se contactó Google Sheets porque no hay URL configurada o está en modo offline).'
+      };
+    }
+
+    try {
+      const url = new URL(this.config.webAppUrl);
+      url.searchParams.set('action', 'getInitialData');
+      url.searchParams.set('userEmail', this.usuarioActivo.correo);
+      if (forzar) {
+        url.searchParams.set('_ts', Date.now().toString());
+      }
+
+      const resp = await fetch(url.toString(), {
+        method: 'GET'
+      });
+
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+      }
+
+      const resJson = await resp.json();
+
+      if (!resJson.success || !resJson.data) {
+        return {
+          success: false,
+          error: resJson.error || 'Respuesta inválida del backend de Google Apps Script.'
+        };
+      }
+
+      const data = resJson.data;
+
+      // 1. Cabeceras
+      if (Array.isArray(data.cabeceras) && data.cabeceras.length > 0) {
+        this.cabeceras = data.cabeceras.map((c: any) => ({
+          ...c,
+          version: Number(c.version) || 1
+        }));
+      }
+
+      // 2. Detalles
+      if (Array.isArray(data.detalles) && data.detalles.length > 0) {
+        this.detalles = data.detalles.map((d: any) => ({
+          ...d,
+          cantidadSolicitada: Number(d.cantidadSolicitada) || 0,
+          cantidadAsignada: Number(d.cantidadAsignada) || 0,
+          cantidadDespachada: Number(d.cantidadDespachada) || 0
+        }));
+      }
+
+      // 3. Manifiestos
+      if (Array.isArray(data.manifiestos) && data.manifiestos.length > 0) {
+        this.manifiestos = data.manifiestos.map((m: any) => ({
+          ...m,
+          totalPiezas: Number(m.totalPiezas) || 0,
+          skusUnicos: Number(m.skusUnicos) || 0,
+          totalPallets: Number(m.totalPallets) || 1
+        }));
+      }
+
+      // 4. DPL Detalle (Inventario Físico)
+      if (Array.isArray(data.dplDetalle) && data.dplDetalle.length > 0) {
+        this.dplDetalle = data.dplDetalle.map((i: any) => ({
+          ...i,
+          cantidadTotal: Number(i.cantidadTotal) || 0,
+          cantidadAsignada: Number(i.cantidadAsignada) || 0,
+          cantidadDespachada: Number(i.cantidadDespachada) || 0,
+          saldoDisponible: i.saldoDisponible !== undefined 
+            ? Number(i.saldoDisponible) 
+            : (Number(i.cantidadTotal) || 0) - (Number(i.cantidadAsignada) || 0) - (Number(i.cantidadDespachada) || 0)
+        }));
+      }
+
+      // 5. Modelos
+      if (Array.isArray(data.modelos) && data.modelos.length > 0) {
+        this.modelos = data.modelos;
+      }
+
+      // 6. Encargados
+      if (Array.isArray(data.encargados) && data.encargados.length > 0) {
+        this.encargados = data.encargados;
+      }
+
+      // 7. Auditoría
+      if (Array.isArray(data.auditoria) && data.auditoria.length > 0) {
+        this.auditoria = data.auditoria;
+      }
+
+      this.persistirDatos();
+      this.guardarConfig({
+        estadoConexion: 'CONECTADO_CANONICO',
+        ultimoPing: new Date().toISOString()
+      });
+
+      return {
+        success: true,
+        totalCargado: {
+          cabeceras: this.cabeceras.length,
+          detalles: this.detalles.length,
+          manifiestos: this.manifiestos.length,
+          dplDetalle: this.dplDetalle.length,
+          modelos: this.modelos.length,
+          encargados: this.encargados.length,
+          auditoria: this.auditoria.length
+        }
+      };
+    } catch (err: any) {
+      console.warn('Fallo al obtener datos vivos desde Google Sheets (manteniendo caché local):', err);
+      return {
+        success: false,
+        error: `Error de red al consultar Google Sheets: ${err.message || err}`
+      };
+    }
   }
 
   public getUsuarioActivo(): UsuarioActivo {
@@ -825,19 +969,45 @@ class AppsScriptClientService {
    * - Solamente cuando el estatus pasa a 'RECIBIDO' se ejecuta el matching automático FIFO y se asignan repuestos a pedidos.
    * - Si está en 'EN TRÁNSITO' o 'ADUANA', los repuestos NO se asignan a órdenes, pero quedan registrados en historial y disponibles para rastreo universal.
    */
-  public actualizarEstatusManifiesto(
+  public async actualizarEstatusManifiesto(
     contenedorId: string,
     nuevoEstado: EstatusDPL | string
-  ): {
+  ): Promise<{
     success: boolean;
     nuevoEstado: EstatusDPL;
     asignacionesEjecutadas: boolean;
     reporteMatching?: any;
     error?: string;
     mensaje: string;
-  } {
+  }> {
     const idTarget = (contenedorId || '').trim().toUpperCase();
     let contIndex = this.manifiestos.findIndex(m => (m.contenedorId || '').trim().toUpperCase() === idTarget);
+    const estadoNormalizado = normalizarEstatusDPL(nuevoEstado);
+    const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const operationId = `OP-MAN-STATUS-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    // 1. Si hay Web App URL configurada, enviar mutación a Apps Script
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'updateManifiestoStatus',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            contenedorId: idTarget,
+            nuevoEstado: estadoNormalizado
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          console.warn('Apps Script updateManifiestoStatus error:', resJson.error);
+        }
+      } catch (err) {
+        console.warn('Fallo llamada a Apps Script updateManifiestoStatus, aplicando fallback local:', err);
+      }
+    }
     
     if (contIndex === -1) {
       // Auto-registrar cabecera de manifiesto si no existía
@@ -855,15 +1025,14 @@ class AppsScriptClientService {
         totalPiezas: totalPiezas || 1,
         skusUnicos: skus || 1,
         totalPallets: pallets || 1,
-        estado: normalizarEstatusDPL(nuevoEstado),
+        estado: estadoNormalizado,
         creadoPor: this.usuarioActivo.nombre,
-        creadoEn: new Date().toISOString().replace('T', ' ').substring(0, 19)
+        creadoEn: ahora
       };
       this.manifiestos.unshift(nuevoMan);
       contIndex = 0;
     }
 
-    const estadoNormalizado = normalizarEstatusDPL(nuevoEstado);
     const estadoAnterior = this.manifiestos[contIndex].estado;
     this.manifiestos[contIndex].estado = estadoNormalizado;
 
@@ -888,7 +1057,6 @@ class AppsScriptClientService {
     const asignacionesEjecutadas = estadoNormalizado === 'RECIBIDO';
 
     // Registro en auditoría inmutable
-    const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
     this.auditoria.unshift({
       auditoriaId: `AUD-DPL-${Date.now()}`,
       timestamp: ahora,
@@ -899,7 +1067,7 @@ class AppsScriptClientService {
       identificador: idTarget,
       valoresAnteriores: JSON.stringify({ estado: estadoAnterior }),
       valoresNuevos: JSON.stringify({ estado: estadoNormalizado }),
-      operationId: `OP-DPL-STATUS-${Date.now()}`,
+      operationId: operationId,
       notas: `Estatus de contenedor ${idTarget} actualizado a ${estadoNormalizado}.${
         estadoNormalizado === 'RECIBIDO' 
           ? ` Asignación automática ejecutada: ${reporteMatching.piezasAsignadas} piezas asignadas.` 
@@ -925,7 +1093,7 @@ class AppsScriptClientService {
   /**
    * Importación de un nuevo Manifiesto / DPL con selección de estatus inicial
    */
-  public importarManifiestoDPL(payload: {
+  public async importarManifiestoDPL(payload: {
     contenedorId: string;
     proveedor?: string;
     poReferencia?: string;
@@ -942,7 +1110,7 @@ class AppsScriptClientService {
       pallet?: string;
       unidadMedida?: string;
     }>;
-  }): {
+  }): Promise<{
     success: boolean;
     contenedorId: string;
     totalLineas: number;
@@ -952,7 +1120,7 @@ class AppsScriptClientService {
     reporteMatching?: any;
     error?: string;
     mensaje: string;
-  } {
+  }> {
     const idCont = (payload.contenedorId || '').trim().toUpperCase();
     if (!idCont) {
       return {
@@ -982,6 +1150,35 @@ class AppsScriptClientService {
 
     const estadoNormalizado = normalizarEstatusDPL(payload.estado || 'EN TRÁNSITO');
     const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const operationId = `OP-DPL-UPLOAD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    // 1. Si hay Web App URL configurada, enviar mutación a Apps Script
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'importManifiestoDPL',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            contenedorId: idCont,
+            proveedor: payload.proveedor,
+            poReferencia: payload.poReferencia,
+            tipoTransporte: payload.tipoTransporte,
+            fechaArribo: payload.fechaArribo,
+            estado: estadoNormalizado,
+            items: payload.items
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          console.warn('Apps Script importManifiestoDPL error:', resJson.error);
+        }
+      } catch (err) {
+        console.warn('Fallo llamada a Apps Script importManifiestoDPL, aplicando fallback local:', err);
+      }
+    }
 
     // Eliminar versión previa del mismo contenedor si ya existía para sobrescribir limpiamente
     this.manifiestos = this.manifiestos.filter(m => m.contenedorId.trim().toUpperCase() !== idCont);
@@ -1081,7 +1278,7 @@ class AppsScriptClientService {
         skus: skusSet.size,
         pallets: palletsSet.size
       }),
-      operationId: `OP-DPL-UPLOAD-${Date.now()}`,
+      operationId: operationId,
       notas: `DPL ${idCont} importado con ${totalPiezas} piezas en estatus ${estadoNormalizado}.${
         estadoNormalizado === 'RECIBIDO' 
           ? ' Asignación FIFO ejecutada.' 
@@ -1214,8 +1411,54 @@ class AppsScriptClientService {
         });
         const resJson = await resp.json();
         if (resJson.success) {
-          // Re-sincronizar
-          return { success: true, pedidoId: resJson.pedidoId };
+          // Actualizar estado canónico local de inmediato para que la UI lo refleje sin recargar
+          const nuevaCabecera: SolicitudCabecera = {
+            ...cabecera,
+            estatusGeneral: 'Pendiente',
+            version: 1,
+            creadoPor: this.usuarioActivo.nombre,
+            creadoEn: ahora,
+            actualizadoPor: this.usuarioActivo.nombre,
+            actualizadoEn: ahora
+          };
+
+          const nuevosDetalles: DetalleRepuesto[] = items.map((it, idx) => ({
+            lineaId: `${cabecera.pedidoId}-L${idx + 1}`,
+            pedidoId: cabecera.pedidoId,
+            codigoRepuesto: it.codigoRepuesto,
+            codigoActualizado: it.codigoRepuesto,
+            descripcionOficial: it.descripcionOficial,
+            cantidadSolicitada: it.cantidadSolicitada,
+            cantidadAsignada: 0,
+            cantidadDespachada: 0,
+            contenedorAsignado: '',
+            palletAsignado: '',
+            packageNo: '',
+            ubicacionCedis: '',
+            estatusLinea: 'Pendiente'
+          }));
+
+          if (!this.cabeceras.some(c => c.pedidoId === cabecera.pedidoId)) {
+            this.cabeceras.unshift(nuevaCabecera);
+            this.detalles.unshift(...nuevosDetalles);
+          }
+
+          this.auditoria.unshift({
+            auditoriaId: `AUD-${Date.now()}`,
+            timestamp: ahora,
+            usuarioId: this.usuarioActivo.usuarioId,
+            usuarioNombre: this.usuarioActivo.nombre,
+            accion: 'CREACION_PEDIDO',
+            entidad: 'Solicitudes_Cabecera',
+            identificador: cabecera.pedidoId,
+            valoresAnteriores: '{}',
+            valoresNuevos: JSON.stringify({ pedidoId: cabecera.pedidoId, totalLineas: items.length, cliente: cabecera.cliente }),
+            operationId: operationId,
+            notas: `Requisición registrada canónicamente en Google Sheets desde sucursal ${cabecera.sucursal}`
+          });
+
+          this.persistirDatos();
+          return { success: true, pedidoId: resJson.pedidoId || cabecera.pedidoId };
         } else {
           return { success: false, error: resJson.error };
         }
@@ -1310,6 +1553,30 @@ class AppsScriptClientService {
       };
     }
 
+    // 1. Si hay Web App URL configurada, invocar Apps Script con LockService
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'assignStock',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            lineaId: lineaId,
+            inventarioId: inventarioId,
+            cantidad: cantidadAsignar
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          return { success: false, error: resJson.error || 'Error al asignar stock en el servidor.' };
+        }
+      } catch (err) {
+        console.warn('Fallo llamada remota assignStock, aplicando fallback canónico local:', err);
+      }
+    }
+
     const prevAsig = linea.cantidadAsignada;
     const nuevaAsig = prevAsig + cantidadAsignar;
 
@@ -1381,6 +1648,29 @@ class AppsScriptClientService {
     const linea = this.detalles[detIndex];
     if (cantidadDespachar > linea.cantidadAsignada) {
       return { success: false, error: `No se puede despachar más de lo asignado (${linea.cantidadAsignada} u.).` };
+    }
+
+    // 1. Si hay Web App URL configurada, invocar Apps Script con LockService
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'dispatchItem',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            lineaId: lineaId,
+            cantidad: cantidadDespachar
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          return { success: false, error: resJson.error || 'Error al despachar en el servidor.' };
+        }
+      } catch (err) {
+        console.warn('Fallo llamada remota dispatchItem, aplicando fallback canónico local:', err);
+      }
     }
 
     const nuevaDesp = linea.cantidadDespachada + cantidadDespachar;
@@ -1466,6 +1756,32 @@ class AppsScriptClientService {
 
     const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const anterior = { ...this.cabeceras[cabIndex] };
+    const operationId = `OP-UPD-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    // 1. Si hay Web App URL configurada, enviar mutación a Google Apps Script
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'updatePedido',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            pedidoId: pedidoId,
+            datosCabecera: datosCabecera,
+            repuestos: repuestos
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          console.warn('Apps Script updatePedido error:', resJson.error);
+          return { success: false, error: resJson.error || 'Error al actualizar pedido en el backend.' };
+        }
+      } catch (err) {
+        console.warn('Fallo llamada a Apps Script updatePedido, aplicando fallback local:', err);
+      }
+    }
 
     // Actualizar campos de cabecera
     this.cabeceras[cabIndex] = {
@@ -1512,7 +1828,7 @@ class AppsScriptClientService {
       identificador: pedidoId,
       valoresAnteriores: JSON.stringify(anterior),
       valoresNuevos: JSON.stringify(this.cabeceras[cabIndex]),
-      operationId: `OP-EDIT-${Date.now()}`,
+      operationId: operationId,
       notas: `Pedido ${pedidoId} modificado por ${this.usuarioActivo.nombre}`
     });
 
@@ -1534,6 +1850,33 @@ class AppsScriptClientService {
     }
 
     const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const operationId = `OP-STATUS-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    // 1. Si hay Web App URL configurada, invocar Apps Script
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'changePedidoStatus',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            pedidoId: pedidoId,
+            nuevoEstatus: nuevoEstatus,
+            notaBitacora: notaBitacora
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          console.warn('Apps Script changePedidoStatus error:', resJson.error);
+          return { success: false, error: resJson.error || 'Error al cambiar estatus en el backend.' };
+        }
+      } catch (err) {
+        console.warn('Fallo llamada a Apps Script changePedidoStatus, aplicando fallback local:', err);
+      }
+    }
+
     const estatusAnterior = this.cabeceras[cabIndex].estatusGeneral;
     this.cabeceras[cabIndex].estatusGeneral = nuevoEstatus as any;
     this.cabeceras[cabIndex].actualizadoPor = this.usuarioActivo.nombre;
@@ -1563,7 +1906,7 @@ class AppsScriptClientService {
       identificador: pedidoId,
       valoresAnteriores: JSON.stringify({ estatusGeneral: estatusAnterior }),
       valoresNuevos: JSON.stringify({ estatusGeneral: nuevoEstatus }),
-      operationId: `OP-STATUS-${Date.now()}`,
+      operationId: operationId,
       notas: `Cambio de estatus de ${estatusAnterior} a ${nuevoEstatus}`
     });
 
@@ -1582,6 +1925,30 @@ class AppsScriptClientService {
 
     const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const cab = this.cabeceras[cabIndex];
+    const operationId = `OP-DEL-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    // 1. Si hay Web App URL configurada, invocar Apps Script
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'deletePedido',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            pedidoId: pedidoId
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          console.warn('Apps Script deletePedido error:', resJson.error);
+          return { success: false, error: resJson.error || 'Error al eliminar pedido en el backend.' };
+        }
+      } catch (err) {
+        console.warn('Fallo llamada a Apps Script deletePedido, aplicando fallback local:', err);
+      }
+    }
 
     // Liberar cualquier cantidad asignada de vuelta al DPL
     const detallesABorrar = this.detalles.filter(d => d.pedidoId === pedidoId);
@@ -1618,7 +1985,7 @@ class AppsScriptClientService {
       identificador: pedidoId,
       valoresAnteriores: JSON.stringify(cab),
       valoresNuevos: 'ELIMINADO',
-      operationId: `OP-DEL-${Date.now()}`,
+      operationId: operationId,
       notas: `Pedido ${pedidoId} eliminado permanentemente por ${this.usuarioActivo.nombre}`
     });
 
@@ -1635,6 +2002,32 @@ class AppsScriptClientService {
     }
 
     const setIds = new Set(pedidoIds);
+    const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const operationId = `OP-DEL-MASIVO-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    // 1. Si hay Web App URL configurada, invocar Apps Script
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'bulkDeletePedidos',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            pedidoIds: pedidoIds
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          console.warn('Apps Script bulkDeletePedidos error:', resJson.error);
+          return { success: false, totalEliminados: 0, error: resJson.error || 'Error al eliminar pedidos en el backend.' };
+        }
+      } catch (err) {
+        console.warn('Fallo llamada a Apps Script bulkDeletePedidos, aplicando fallback local:', err);
+      }
+    }
+
     let eliminados = 0;
 
     // Liberar asignaciones de todos
@@ -1661,7 +2054,6 @@ class AppsScriptClientService {
     eliminados = totalAntes - this.cabeceras.length;
     this.detalles = this.detalles.filter(d => !setIds.has(d.pedidoId));
 
-    const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
     this.auditoria.unshift({
       auditoriaId: `AUD-${Date.now()}`,
       timestamp: ahora,
@@ -1672,7 +2064,7 @@ class AppsScriptClientService {
       identificador: `LOTE-${eliminados}-PEDIDOS`,
       valoresAnteriores: JSON.stringify(pedidoIds),
       valoresNuevos: 'ELIMINADOS_MASIVO',
-      operationId: `OP-DEL-MASIVO-${Date.now()}`,
+      operationId: operationId,
       notas: `Eliminación masiva de ${eliminados} pedidos.`
     });
 
@@ -1700,6 +2092,32 @@ class AppsScriptClientService {
 
     const setIds = new Set(pedidoIds);
     const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const operationId = `OP-EDIT-MASIVO-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    // 1. Si hay Web App URL configurada, invocar Apps Script
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'bulkUpdatePedidos',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            pedidoIds: pedidoIds,
+            cambios: cambios
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          console.warn('Apps Script bulkUpdatePedidos error:', resJson.error);
+          return { success: false, totalActualizados: 0, error: resJson.error || 'Error al actualizar pedidos en el backend.' };
+        }
+      } catch (err) {
+        console.warn('Fallo llamada a Apps Script bulkUpdatePedidos, aplicando fallback local:', err);
+      }
+    }
+
     let count = 0;
 
     this.cabeceras.forEach((c, idx) => {
@@ -1747,7 +2165,7 @@ class AppsScriptClientService {
       identificador: `LOTE-${count}-PEDIDOS`,
       valoresAnteriores: '',
       valoresNuevos: JSON.stringify(cambios),
-      operationId: `OP-EDIT-MASIVO-${Date.now()}`,
+      operationId: operationId,
       notas: `Edición masiva de ${count} pedidos aplicada.`
     });
 
@@ -1776,19 +2194,58 @@ class AppsScriptClientService {
     categoria: string = 'Nota General'
   ): BitacoraNota {
     const notas = this.getNotasPedido(pedidoId);
+    const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const nuevaNota: BitacoraNota = {
       id: `NOTA-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       pedidoId,
       autor: this.usuarioActivo.nombre,
       sucursal: this.usuarioActivo.sucursal,
-      fecha: new Date().toISOString().replace('T', ' ').substring(0, 19),
+      fecha: ahora,
       categoria,
       texto
     };
 
     notas.unshift(nuevaNota);
     this.safeSet(`changan_bitacora_${pedidoId}`, JSON.stringify(notas));
+
+    // Si hay Web App URL configurada, enviar en background a Google Apps Script
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      const operationId = `OP-NOTA-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      fetch(this.config.webAppUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'addPedidoNota',
+          userEmail: this.usuarioActivo.correo,
+          operationId: operationId,
+          nota: nuevaNota
+        })
+      }).catch(err => {
+        console.warn('Fallo llamada a Apps Script addPedidoNota:', err);
+      });
+    }
+
     return nuevaNota;
+  }
+
+  /**
+   * Consulta remota de bitácora de observaciones desde Google Sheets
+   */
+  public async fetchNotasPedido(pedidoId: string): Promise<BitacoraNota[]> {
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const url = `${this.config.webAppUrl}?action=getNotasPedido&pedidoId=${encodeURIComponent(pedidoId)}`;
+        const resp = await fetch(url);
+        const resJson = await resp.json();
+        if (resJson.success && Array.isArray(resJson.notas)) {
+          this.safeSet(`changan_bitacora_${pedidoId}`, JSON.stringify(resJson.notas));
+          return resJson.notas;
+        }
+      } catch (err) {
+        console.warn('Fallo cargando notas remotas de pedido:', err);
+      }
+    }
+    return this.getNotasPedido(pedidoId);
   }
 
   /**
@@ -1815,6 +2272,30 @@ class AppsScriptClientService {
 
     const operationId = `OP-MERMA-${Date.now()}`;
     const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+    // 1. Si hay Web App URL configurada, invocar Apps Script con LockService
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'adjustMerma',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            inventarioId: inventarioId,
+            cantidad: cantidad,
+            motivo: motivo
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          return { success: false, error: resJson.error || 'Error al procesar merma en el servidor.' };
+        }
+      } catch (err) {
+        console.warn('Fallo llamada remota adjustMerma, aplicando fallback local:', err);
+      }
+    }
 
     const nuevoTotal = lote.cantidadTotal - cantidad;
     const nuevoSaldo = nuevoTotal - lote.cantidadAsignada - lote.cantidadDespachada;
@@ -1874,6 +2355,28 @@ class AppsScriptClientService {
         lineasAgregadas: 0,
         error: 'Operación previamente procesada (Idempotencia garantizada).'
       };
+    }
+
+    // 2. Si hay Web App URL configurada, invocar Apps Script con LockService
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      try {
+        const resp = await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'commitImport',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            registros: registrosAprobados
+          })
+        });
+        const resJson = await resp.json();
+        if (!resJson.success) {
+          return { success: false, pedidosAgregados: 0, lineasAgregadas: 0, error: resJson.error || 'Error al procesar commitImport en el servidor.' };
+        }
+      } catch (err) {
+        console.warn('Fallo llamada remota commitImport, aplicando fallback canónico local:', err);
+      }
     }
 
     const ahora = new Date().toISOString().replace('T', ' ').substring(0, 19);
@@ -2482,7 +2985,44 @@ class AppsScriptClientService {
       reporteMatching = this.ejecutarMatchingGlobal();
     }
 
-    // 3. Sincronizar con Google Sheets si fue solicitado
+    // 3. Sincronizar con Google Sheets (Solicitudes_Cabecera y Detalle_Repuestos)
+    if (this.config.webAppUrl && !this.config.modoOfflineSimulado) {
+      const operationId = `OP-BULK-IMP-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      try {
+        const payloadPedidos = Array.from(pedidosMap.values()).map(g => ({
+          cabecera: g.cabecera,
+          items: g.items.map(it => ({
+            lineaId: it.lineaId,
+            codigoRepuesto: it.codigo,
+            codigoActualizado: it.codigoActualizado,
+            descripcionOficial: it.descripcion,
+            cantidadSolicitada: it.cantidad,
+            cantidadAsignada: it.cantidadAsignada,
+            cantidadDespachada: it.cantidadDespachada,
+            contenedorAsignado: it.contenedorAsignado,
+            palletAsignado: it.palletAsignado,
+            packageNo: it.packageNo,
+            ubicacionCedis: it.ubicacionCedis,
+            estatusLinea: it.estatusLinea
+          }))
+        }));
+
+        await fetch(this.config.webAppUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'bulkImportPedidos',
+            userEmail: this.usuarioActivo.correo,
+            operationId: operationId,
+            pedidos: payloadPedidos
+          })
+        });
+      } catch (err) {
+        console.warn('Fallo llamada a Apps Script bulkImportPedidos, aplicando fallback local:', err);
+      }
+    }
+
+    // 4. Sincronizar Matriz Central completa si fue solicitado explícitamente
     let syncSheetsResult: { ok: boolean; mensaje: string } | undefined;
     if (opciones.sincronizarGoogleSheets) {
       syncSheetsResult = await this.sincronizarMatrizConGoogleSheets();

@@ -97,7 +97,7 @@ export const CruceDPL: React.FC<CruceDPLProps> = ({
   }, [itemsContenedor, busquedaRepuesto]);
 
   // Manejador para cambiar el estatus del contenedor (Ciclo de Vida)
-  const handleCambiarEstatus = (nuevoEstado: EstatusDPL, contIdOverride?: string) => {
+  const handleCambiarEstatus = async (nuevoEstado: EstatusDPL, contIdOverride?: string) => {
     const contId = contIdOverride || (contenedorActivo ? contenedorActivo.contenedor : '');
     if (!contId) return;
 
@@ -110,7 +110,7 @@ export const CruceDPL: React.FC<CruceDPLProps> = ({
 
     try {
       // Actualizar en AppsScriptClient (motor canónico)
-      const res = appsScriptClient.actualizarEstatusManifiesto(contId, nuevoEstado);
+      const res = await appsScriptClient.actualizarEstatusManifiesto(contId, nuevoEstado);
 
       // Sincronizar en CedisService
       cedisService.actualizarEstadoContenedor(contId, nuevoEstado);

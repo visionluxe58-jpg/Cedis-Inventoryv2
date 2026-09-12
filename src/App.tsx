@@ -80,6 +80,19 @@ export default function App() {
 
   useEffect(() => {
     recargarDatos();
+
+    // Sincronización Canónica al inicio: si hay Web App configurada, traer los datos vivos de Google Sheets
+    const cfg = appsScriptClient.getConfig();
+    if (cfg.webAppUrl && !cfg.modoOfflineSimulado) {
+      appsScriptClient.fetchInitialData().then(res => {
+        if (res.success && res.totalCargado) {
+          recargarDatos();
+          mostrarNotificacion('info', `Datos canónicos sincronizados desde Google Sheets (${res.totalCargado.cabeceras} pedidos, ${res.totalCargado.dplDetalle} lotes DPL).`);
+        }
+      }).catch(err => {
+        console.warn('Carga inicial desde Google Sheets diferida a caché local:', err);
+      });
+    }
   }, [recargarDatos]);
 
   // Escuchar cambios de historial en el navegador

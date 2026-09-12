@@ -17,6 +17,9 @@ describe('Pruebas Automatizadas CEDIS Changan - Reglas Críticas', () => {
       movilHabilitado: true
     };
     appsScriptClient.setUsuarioActivo(admin);
+    appsScriptClient.guardarConfig({
+      modoOfflineSimulado: true
+    });
   });
 
   describe('1. Regla de Saldo Disponible en DPL_Detalle', () => {

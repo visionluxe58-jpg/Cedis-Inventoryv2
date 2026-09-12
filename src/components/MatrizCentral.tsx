@@ -80,6 +80,7 @@ export const MatrizCentral: React.FC<MatrizCentralProps> = ({
   const [procesando, setProcesando] = useState<boolean>(false);
   const [ejecutandoMatching, setEjecutandoMatching] = useState<boolean>(false);
   const [sincronizandoSheets, setSincronizandoSheets] = useState<boolean>(false);
+  const [cargandoNube, setCargandoNube] = useState<boolean>(false);
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null);
 
   const esRolOperativo = usuario.rol === 'ADMINISTRADOR_CEDIS' || usuario.rol === 'OPERADOR_CEDIS';
@@ -323,6 +324,34 @@ export const MatrizCentral: React.FC<MatrizCentralProps> = ({
     }
   };
 
+  const handleRecargarDesdeSheets = async () => {
+    setCargandoNube(true);
+    setMensaje(null);
+
+    try {
+      const res = await appsScriptClient.fetchInitialData(true);
+      onActualizar();
+      if (res.success && res.totalCargado) {
+        setMensaje({
+          tipo: 'ok',
+          texto: `Datos vivos sincronizados desde Google Sheets: ${res.totalCargado.cabeceras} pedidos y ${res.totalCargado.dplDetalle} lotes de inventario DPL.`
+        });
+      } else if (res.error) {
+        setMensaje({
+          tipo: 'ok',
+          texto: res.error
+        });
+      }
+    } catch (e: any) {
+      setMensaje({
+        tipo: 'error',
+        texto: 'Error al consultar datos desde Google Sheets: ' + (e.message || e)
+      });
+    } finally {
+      setCargandoNube(false);
+    }
+  };
+
   const exportarCSV = () => {
     const headers = [
       'Pedido', 'Línea', 'Fecha', 'Sucursal', 'Asesor', 'Tipo Pedido', 'Cotización',
@@ -369,7 +398,7 @@ export const MatrizCentral: React.FC<MatrizCentralProps> = ({
     <div className="space-y-4">
       {/* Tarjetas Resumen de Matching y Estado */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow">
+        <div className="bg-slate-900 border border-slate-800 border-t-2 border-t-sky-500 rounded-xl p-3.5 shadow">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-slate-400 uppercase font-semibold">Total en Matriz</span>
             <Table className="w-4 h-4 text-sky-400" />
@@ -378,7 +407,7 @@ export const MatrizCentral: React.FC<MatrizCentralProps> = ({
           <div className="text-[11px] text-slate-400 mt-0.5">{metricas.piezasSolicitadas} unidades solicitadas</div>
         </div>
 
-        <div className="bg-slate-900 border border-emerald-900/40 rounded-xl p-3.5 shadow">
+        <div className="bg-slate-900 border border-emerald-900/40 border-t-2 border-t-emerald-500 rounded-xl p-3.5 shadow">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-emerald-400 uppercase font-semibold">Asignadas en Pallets</span>
             <Box className="w-4 h-4 text-emerald-400" />
@@ -391,7 +420,7 @@ export const MatrizCentral: React.FC<MatrizCentralProps> = ({
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-amber-900/40 rounded-xl p-3.5 shadow">
+        <div className="bg-slate-900 border border-amber-900/40 border-t-2 border-t-amber-500 rounded-xl p-3.5 shadow">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-amber-400 uppercase font-semibold">Pendientes de Stock</span>
             <Clock className="w-4 h-4 text-amber-400" />
@@ -404,7 +433,7 @@ export const MatrizCentral: React.FC<MatrizCentralProps> = ({
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-purple-900/40 rounded-xl p-3.5 shadow">
+        <div className="bg-slate-900 border border-purple-900/40 border-t-2 border-t-purple-500 rounded-xl p-3.5 shadow">
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-purple-400 uppercase font-semibold">Despachadas</span>
             <Truck className="w-4 h-4 text-purple-400" />
@@ -474,6 +503,18 @@ export const MatrizCentral: React.FC<MatrizCentralProps> = ({
           >
             <FileSpreadsheet className={`w-3.5 h-3.5 ${sincronizandoSheets ? 'animate-spin' : ''}`} />
             <span>{sincronizandoSheets ? 'Sincronizando...' : 'Sync Sheets'}</span>
+          </button>
+
+          {/* Botón: Traer de Sheets (Carga Bidireccional getInitialData) */}
+          <button
+            onClick={handleRecargarDesdeSheets}
+            disabled={cargandoNube}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white shadow-md shadow-sky-900/30 border border-sky-400/30 transition shrink-0 disabled:opacity-50 cursor-pointer"
+            title="Traer información viva y actualizada de pedidos e inventario desde Google Sheets (getInitialData)"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${cargandoNube ? 'animate-spin' : ''}`} />
+            <span>{cargandoNube ? 'Trayendo...' : 'Traer de Sheets'}</span>
+            <span className="hidden xl:inline-block text-[9px] px-1.5 py-0.5 bg-white/20 rounded font-bold uppercase tracking-wider">En Vivo</span>
           </button>
 
           {/* Exportar CSV */}

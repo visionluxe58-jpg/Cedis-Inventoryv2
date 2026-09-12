@@ -165,7 +165,7 @@ export const ModalDPL: React.FC<ModalDPLProps> = ({
     setErrorMsg(null);
   };
 
-  const handleProcesar = () => {
+  const handleProcesar = async () => {
     if (!infoDetectada || infoDetectada.items.length === 0) {
       setErrorMsg('No se detectaron repuestos válidos en el archivo.');
       return;
@@ -181,7 +181,7 @@ export const ModalDPL: React.FC<ModalDPLProps> = ({
 
     try {
       // 1. Importar en AppsScriptClient (Motor central Canónico)
-      const resAppsScript = appsScriptClient.importarManifiestoDPL({
+      const resAppsScript = await appsScriptClient.importarManifiestoDPL({
         contenedorId: idFinal,
         proveedor,
         poReferencia: `PO-${idFinal}`,
