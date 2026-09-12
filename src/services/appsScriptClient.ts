@@ -685,22 +685,104 @@ class AppsScriptClientService {
 
       const data = resJson.data;
 
-      // 1. Cabeceras
-      if (Array.isArray(data.cabeceras) && data.cabeceras.length > 0) {
-        this.cabeceras = data.cabeceras.map((c: any) => ({
-          ...c,
-          version: Number(c.version) || 1
-        }));
-      }
+      // 1. Si recibimos data.matriz directa (hoja canónica de 25 columnas de Google Sheets):
+      if (Array.isArray(data.matriz) && data.matriz.length > 0) {
+        const mapCab: Record<string, SolicitudCabecera> = {};
+        const arrDet: DetalleRepuesto[] = [];
 
-      // 2. Detalles
-      if (Array.isArray(data.detalles) && data.detalles.length > 0) {
-        this.detalles = data.detalles.map((d: any) => ({
-          ...d,
-          cantidadSolicitada: Number(d.cantidadSolicitada) || 0,
-          cantidadAsignada: Number(d.cantidadAsignada) || 0,
-          cantidadDespachada: Number(d.cantidadDespachada) || 0
-        }));
+        data.matriz.forEach((r: any, idx: number) => {
+          const pId = String(r['ID Pedido'] || r['Pedido_ID'] || r.pedidoId || `PED-${idx + 1}`).trim();
+          const linId = String(r['Linea_ID'] || r.lineaId || `LIN-${idx + 1}`).trim();
+          const fch = String(r['Fecha Registro'] || r['Fecha_Creacion'] || r.fechaCreacion || new Date().toISOString()).trim();
+          const suc = String(r['Sucursal Solicitante'] || r['Sucursal'] || r.sucursal || 'Bodega Central').trim();
+          const col = String(r['Colaborador'] || r['Colaborador_Asesor'] || r.colaborador || 'Usuario CEDIS').trim();
+          const tip = (String(r['Tipo Pedido'] || r['Tipo_Solicitud_Prioridad'] || r.tipoPedido || 'Especial').trim()) as any;
+          const cot = String(r['Cotización'] || r['Cotizacion'] || r.cotizacion || '').trim();
+          const cli = String(r['Cliente'] || r.cliente || '').trim();
+          const plc = String(r['Placa'] || r.placa || '').trim();
+          const mod = String(r['Modelo Changan'] || r['Modelo_Changan'] || r.modeloChangan || '').trim();
+          const vin = String(r['VIN'] || r['VIN_Chasis'] || r.vin || '').trim();
+          const nor = String(r['N° OR'] || r['Numero_OR'] || r.numeroOR || '').trim();
+
+          const codRep = String(r['Código Repuesto'] || r['Codigo Repuesto'] || r['Codigo_Repuesto_OEM'] || r.codigoRepuesto || '').trim();
+          const codAct = String(r['Código Actualizado'] || r['Codigo Actualizado'] || r['Codigo_Actualizado'] || r.codigoActualizado || codRep).trim();
+          const descOf = String(r['Descripción Oficial'] || r['Descripcion Oficial'] || r['Descripcion_Oficial'] || r.descripcionOficial || '').trim();
+          const cSol = Number(r['Cant Solicitada'] || r['Cantidad Solicitada'] || r['Cantidad_Solicitada'] || r.cantidadSolicitada) || 1;
+          const cAsig = Number(r['Cant Asignada'] || r['Cantidad Asignada'] || r['Cantidad_Asignada'] || r.cantidadAsignada) || 0;
+          const cDesp = Number(r['Cant Despachada'] || r['Cantidad Despachada'] || r['Cantidad_Despachada'] || r.cantidadDespachada) || 0;
+          const estL = (String(r['Estatus Línea'] || r['Estatus Linea'] || r['Estatus_Linea'] || r.estatusLinea || 'PENDIENTE').trim()) as any;
+          const estG = (String(r['Estatus General'] || r['Estado General'] || r.estatusGeneral || 'PENDIENTE').trim()) as any;
+          const cAsignado = String(r['Contenedor Asignado'] || r['Contenedor_Asignado'] || r.contenedorAsignado || '').trim();
+          const pAsignado = String(r['Pallet Asignado'] || r['Pallet_Asignado'] || r.palletAsignado || '').trim();
+          const pkgNo = String(r['N° Paquete'] || r['Package No'] || r['Package_No'] || r.packageNo || '').trim();
+          const ubi = String(r['Ubicación CEDIS'] || r['Ubicacion CEDIS'] || r['Ubicacion_CEDIS'] || r.ubicacionCedis || '').trim();
+          const obs = String(r['Observaciones'] || r.observaciones || '').trim();
+
+          if (!mapCab[pId]) {
+            mapCab[pId] = {
+              pedidoId: pId,
+              fechaCreacion: fch,
+              sucursal: suc,
+              colaborador: col,
+              canal: 'Mostrador',
+              tipoPedido: tip,
+              cotizacion: cot,
+              cliente: cli,
+              placa: plc,
+              modeloChangan: mod,
+              vin: vin,
+              numeroOR: nor,
+              estadoPago: 'Pendiente',
+              documentoPagoFactura: '',
+              facturadoFinal: 'No',
+              estatusGeneral: estG,
+              estatusFabrica: '',
+              origen: 'EXCEL',
+              version: 1,
+              creadoPor: col,
+              creadoEn: fch,
+              actualizadoPor: col,
+              actualizadoEn: fch,
+              observaciones: obs
+            };
+          }
+
+          arrDet.push({
+            lineaId: linId,
+            pedidoId: pId,
+            codigoRepuesto: codRep,
+            codigoActualizado: codAct,
+            descripcionOficial: descOf,
+            cantidadSolicitada: cSol,
+            cantidadAsignada: cAsig,
+            cantidadDespachada: cDesp,
+            contenedorAsignado: cAsignado,
+            palletAsignado: pAsignado,
+            packageNo: pkgNo,
+            ubicacionCedis: ubi,
+            estatusLinea: estL
+          });
+        });
+
+        this.cabeceras = Object.values(mapCab);
+        this.detalles = arrDet;
+      } else {
+        // Fallback a tablas separadas de cabeceras y detalles
+        if (Array.isArray(data.cabeceras) && data.cabeceras.length > 0) {
+          this.cabeceras = data.cabeceras.map((c: any) => ({
+            ...c,
+            version: Number(c.version) || 1
+          }));
+        }
+
+        if (Array.isArray(data.detalles) && data.detalles.length > 0) {
+          this.detalles = data.detalles.map((d: any) => ({
+            ...d,
+            cantidadSolicitada: Number(d.cantidadSolicitada) || 0,
+            cantidadAsignada: Number(d.cantidadAsignada) || 0,
+            cantidadDespachada: Number(d.cantidadDespachada) || 0
+          }));
+        }
       }
 
       // 3. Manifiestos
